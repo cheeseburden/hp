@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.env
+.venv/
+venv/
+env/
+
+# Model artifacts (large files)
+model_output/*.joblib
+model_output/*.json
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node
+node_modules/
+dist/
+
+# Docker
+*.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (too large for git)
+cyber_simulator_json_format/
+two_day_sample_cyber_simulator_json_format/sample_json_20260301/*.json
