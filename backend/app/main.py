@@ -1,0 +1,118 @@
+"""
+main.py — FastAPI application entry point for the HPE Threat Detection Pipeline.
+Handles startup/shutdown lifecycle, CORS, and route registration.
+"""
+
+import logging
+import time
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import APP_NAME, APP_TAGLINE, APP_VERSION, MODEL_PATH
+from app import inference, kafka_client, elastic_client, vault_client
+from app.routes import predict, health, pipeline, simulate
+
+# ── Logging ────────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("hpe.main")
+
+
+# ── Lifespan (startup/shutdown) ───────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle — load models and connect to infrastructure."""
+    logger.info(f"{'='*60}")
+    logger.info(f"  {APP_NAME} — {APP_TAGLINE}")
+    logger.info(f"  Version: {APP_VERSION}")
+    logger.info(f"{'='*60}")
+
+    # Load ML model artifacts
+    try:
+        inference.load_model(MODEL_PATH)
+        logger.info("[OK] ML model loaded successfully")
+    except Exception as e:
+        logger.error(f"[FAIL] ML model loading failed: {e}")
+
+    # Connect to Kafka
+    try:
+        kafka_connected = kafka_client.connect_kafka()
+        if kafka_connected:
+            logger.info("[OK] Kafka connected")
+        else:
+            logger.warning("[WARN] Kafka connection failed — running in fallback mode")
+    except Exception as e:
+        logger.warning(f"[WARN] Kafka unavailable: {e}")
+
+    # Connect to Elasticsearch
+    try:
+        es_connected = elastic_client.connect_elasticsearch()
+        if es_connected:
+            logger.info("[OK] Elasticsearch connected")
+        else:
+            logger.warning("[WARN] Elasticsearch connection failed — running in fallback mode")
+    except Exception as e:
+        logger.warning(f"[WARN] Elasticsearch unavailable: {e}")
+
+    # Connect to Vault
+    try:
+        vault_connected = vault_client.connect_vault()
+        if vault_connected:
+            logger.info("[OK] HashiCorp Vault connected")
+        else:
+            logger.warning("[WARN] Vault connection failed — running in fallback mode")
+    except Exception as e:
+        logger.warning(f"[WARN] Vault unavailable: {e}")
+
+    logger.info(f"\n  Pipeline ready. Serving on http://0.0.0.0:8000")
+    logger.info(f"  Docs:  http://localhost:8000/docs")
+    logger.info(f"{'='*60}\n")
+
+    yield  # App runs here
+
+    # Shutdown
+    logger.info("Shutting down HPE Pipeline...")
+    kafka_client.disconnect_kafka()
+    elastic_client.disconnect_elasticsearch()
+    vault_client.disconnect_vault()
+    logger.info("Shutdown complete.")
+
+
+# ── FastAPI app ───────────────────────────────────────────────────────────────
+app = FastAPI(
+    title=APP_NAME,
+    description=f"{APP_TAGLINE} — AI-Powered Network Threat Detection Pipeline",
+    version=APP_VERSION,
+    lifespan=lifespan,
+)
+
+# CORS — allow frontend dev server
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Register routes
+app.include_router(predict.router)
+app.include_router(health.router)
+app.include_router(pipeline.router)
+app.include_router(simulate.router)
+
+
+@app.get("/")
+async def root():
+    """Root endpoint with app info."""
+    return {
+        "app": APP_NAME,
+        "tagline": APP_TAGLINE,
+        "version": APP_VERSION,
+        "docs": "/docs",
+        "health": "/api/health",
+    }

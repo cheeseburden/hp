@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="HPE - AI-Powered Network Threat Detection Pipeline with real-time anomaly detection, 3D globe visualization, and automated incident response.">
+  <title>HPE | AI Threat Detection Pipeline</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+</head>
+<body>
+  <!-- Ambient Background -->
+  <div class="hex-grid-bg"></div>
+  <div class="scanline-overlay"></div>
+
+  <!-- Navigation Header -->
+  <nav class="nav-header" id="nav-header">
+    <div class="nav-logo">
+      <div class="nav-logo-icon">H</div>
+      <div class="nav-logo-text">
+        <h1>HPE</h1>
+        <span>HPE by project interns</span>
+      </div>
+    </div>
+    <div class="nav-status">
+      <div class="status-indicator">
+        <div class="status-dot warning" id="status-ws-dot"></div>
+        <span id="status-ws-text">SYSTEM INITIATING</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Section Navigation Dots -->
+  <div class="section-nav">
+    <button class="section-nav-dot active" title="Globe"></button>
+    <button class="section-nav-dot" title="Pipeline"></button>
+    <button class="section-nav-dot" title="Dashboard"></button>
+  </div>
+
+  <!-- ═══ Section 1: 3D Threat Globe ═══ -->
+  <section class="section" id="globe-section">
+    <div id="globe-container"></div>
+
+    <!-- Arc Details Modal (Appears on click) -->
+    <div id="arc-details-modal" class="arc-details-modal" style="display: none;">
+      <button class="arc-modal-close" id="arc-modal-close">×</button>
+      <div id="arc-details-content"></div>
+    </div>
+
+    <!-- HUD Overlays -->
+    <div class="globe-hud globe-hud-top-left">
+      <div class="hud-card">
+        <div class="hud-label">Events Processed</div>
+        <div class="hud-value" id="hud-event-count">0</div>
+        <div class="hud-sub">Live pipeline throughput</div>
+      </div>
+    </div>
+
+    <div class="globe-hud globe-hud-top-right">
+      <div class="hud-card">
+        <div class="hud-label">Threats Intercepted</div>
+        <div class="hud-value danger" id="hud-threat-count">0</div>
+        <div class="hud-sub">AI-detected anomalies</div>
+      </div>
+    </div>
+
+    <div class="globe-hud globe-hud-bottom-left">
+      <div class="hud-card">
+        <div class="hud-label">Threat Level</div>
+        <div class="hud-value success" id="hud-threat-level">NOMINAL</div>
+        <div class="threat-level-bar">
+          <div class="threat-level-fill" id="threat-level-fill" style="width: 5%;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="globe-hud globe-hud-bottom-right">
+      <div class="hud-card">
+        <div class="hud-label">Server Location</div>
+        <div class="hud-value" style="font-size: 16px; color: var(--cyan);">Bangalore, IN</div>
+        <div class="hud-sub">12.97°N, 77.59°E</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Section 2: Pipeline Flow ═══ -->
+  <section class="section" id="pipeline-section">
+    <div class="section-title">Security Pipeline</div>
+    <h2 class="section-heading">Full Enterprise Pipeline Flow</h2>
+    <p style="color: var(--text-secondary); max-width: 700px; margin-bottom: var(--space-lg); font-size: 14px; line-height: 1.6;">
+      Every network event flows through a 10-stage enterprise security pipeline.
+      Real tools (Kafka, Elasticsearch, Vault) are integrated with AI-powered anomaly detection.
+      Watch events flow in real-time — green for safe, red for threats.
+    </p>
+    <div id="pipeline-content" style="position: relative;"></div>
+
+    <!-- Vault Credential Rotation Overlay -->
+    <div id="vault-terminal" class="vault-terminal" style="display: none;">
+      <div class="terminal-header">
+        <span class="terminal-icon">🔐</span> HashiCorp Vault — Secure Rotation Protocol
+      </div>
+      <div class="terminal-body" id="vault-terminal-body">
+        <!-- Text injected via JS -->
+      </div>
+    </div>
+
+    <!-- Stage Explanation Modal -->
+    <div id="stage-modal" class="stage-modal" style="display: none;">
+      <div class="stage-modal-content">
+        <button id="stage-modal-close" class="stage-modal-close">×</button>
+        <div class="stage-modal-header" id="stage-modal-header">Stage Name</div>
+        <div class="stage-modal-body" id="stage-modal-body">Explanation goes here.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Section 3: Threat Intelligence Dashboard ═══ -->
+  <section class="section" id="dashboard-section">
+    <div class="section-title">Threat Intelligence</div>
+    <h2 class="section-heading">Real-Time Analytics Dashboard</h2>
+    <div id="dashboard-content"></div>
+  </section>
+
+  <!-- Footer -->
+  <footer style="
+    text-align: center;
+    padding: 48px 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    border-top: 1px solid var(--glass-border);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  ">
+    HPE — AI-Powered Network Threat Detection Pipeline — HPE by project interns
+  </footer>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
