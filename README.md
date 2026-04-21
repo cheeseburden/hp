@@ -8,17 +8,19 @@ HPE is a production-grade, AI-powered cybersecurity threat detection pipeline. I
 The system is designed to ingest raw network traffic, extract behavioral features, execute high-speed machine learning inference in a microservice backend, and trigger automated orchestrated responses (like HashiCorp Vault credential rotation) when a zero-day or malicious pattern is detected.
 
 ### The Pipeline Architecture
-The dashboard visually maps and documents an enterprise-grade 10-stage pipeline:
-1. **Network / Apps:** PCAP capture & eBPF tracing tools collect network telemetry.
-2. **Zeek / Suricata:** Deep Packet Inspection (DPI) intrusion detection.
-3. **Elastic Beats:** Elastic Common Schema (ECS) normalization & GeoIP enrichment.
-4. **Apache Kafka:** KRaft mode event streaming broker for high throughput.
-5. **AI Engine:** FastAPI microservice utilizing a Soft-Voting Ensemble (XGBoost + LightGBM + Isolation Forest).
-6. **SOAR:** Security Orchestration, Automation, and Response workflow triggering.
-7. **HashiCorp Vault:** Dynamic secret management API.
-8. **Credential Rotation:** Cryptographically secure revocation of compromised sessions.
-9. **Distribution:** Secure automated pushing of new tokens to internal microservices via TLS 1.3.
-10. **ELK/Grafana:** Elasticsearch persistent indexing and Kibana visual analytics.
+
+The dashboard visually maps and documents an enterprise-grade 10-stage pipeline. Here is exactly what happens during a real-time event:
+
+1. **Network / Apps:** We continuously monitor network traffic across the enterprise. Raw data packets (PCAP) from routers and application logs are collected and converted into a standard format, providing the foundational telemetry stream for our security pipeline.
+2. **Zeek / Suricata (IDS):** Traffic passes through an Intrusion Detection System (IDS). Tools like Suricata and Zeek perform Deep Packet Inspection (DPI) to quickly scan for known malicious patterns and extract useful network metadata (like HTTP or DNS info).
+3. **Elastic Beats:** To keep data organized, we use log shippers like Filebeat. They collect raw logs from the IDS, clean them up into a standardized format called the Elastic Common Schema (ECS), and map IP addresses to geographic locations.
+4. **Apache Kafka:** To transport this massive amount of data smoothly, we use Apache Kafka as a high-throughput event streaming broker. It acts as an immutable buffer, ensuring our AI Engine isn't overwhelmed during sudden spikes in network traffic.
+5. **AI Detection Engine:** The core brain of the system. Our FastAPI microservice consumes the Kafka stream and engineers complex behavioral features in split-seconds. It relies on a state-of-the-art AI ensemble (XGBoost, LightGBM, and Isolation Forest) to predict if an event is a novel, previously unseen threat.
+6. **SOAR:** If the AI flags a threat, our SOAR (Security Orchestration, Automation, and Response) platform takes over. Rather than waiting for a human analyst, it automatically triggers conditional incident response playbooks—like isolating machines or initiating automated password resets.
+7. **HashiCorp Vault:** As part of the automated response, HashiCorp Vault is engaged to secure our infrastructure. Vault manages dynamic secrets; when a threat is detected, it receives an API command to immediately begin revoking compromised access.
+8. **Credential Rotation:** Vault executes a secure credential rotation. It instantly invalidates old, hijacked sessions and generates cryptographically secure, brand-new passwords and API keys for our databases and services, effectively locking the attacker out.
+9. **Credential Distribution:** Once new passwords are created, they must be distributed safely. The system automatically pushes these new Vault secrets back to our servers and active microservices using encrypted TLS tunnels, restoring security without taking the system offline.
+10. **ELK / Grafana:** Finally, every single event—safe traffic or neutralized threat—is permanently recorded. We index all data into an Elasticsearch database, allowing human analysts to search audit logs and view real-time visualizations on Kibana dashboards.
 
 ## Technologies Used
 
@@ -30,12 +32,33 @@ The dashboard visually maps and documents an enterprise-grade 10-stage pipeline:
 
 ## Project Setup
 
-The project is split into a Python Backend and a Vite Frontend.
+You can run this project in two ways: the full enterprise stack (via Docker) which runs all services in real-time, or a standalone local demo mode for testing the UI.
 
-### 1. Backend Setup
+---
 
-The core AI engine and WebSocket simulation server runs on FastAPI.
+### Option 1: Full Enterprise Stack (Docker Compose) 🐳
+*Recommended for production environments.* 
 
+This method will automatically download, build, and orchestrate all 6 containers: Kafka, Elasticsearch, Kibana, HashiCorp Vault, the Python AI Backend, and the Vite Frontend.
+
+1. Ensure Docker Desktop is running and has at least **8GB of Memory** allocated (required for Elastic).
+2. Open a terminal in the root directory and run:
+   ```bash
+   docker-compose up --build
+   ```
+3. Once all systems are healthy, open your browser and navigate to:
+   **http://localhost:5173**
+
+You will see the pipeline connecting to the live backend WebSocket and processing real infrastructure data.
+
+---
+
+### Option 2: Local Demo Mode (No Docker) 💻
+*Recommended for UI development or low-resource machines.*
+
+If you do not want to spin up the heavy infrastructure containers, you can run the backend and frontend scripts directly on your local system. The dashboard will intelligently fall back to generating simulation traffic locally.
+
+**Step 1: Start the Backend (API & Simulation)**
 ```bash
 cd backend
 
@@ -54,13 +77,10 @@ pip install -r requirements.txt
 # Run the FastAPI server
 uvicorn app.main:app --reload --port 8000
 ```
+*Because Kafka and Elastic are not active, the backend API will safely fallback into test mode.*
 
-*Note: For the full production stack involving Kafka and ELK, utilize the provided `docker-compose.yml` (e.g., `docker-compose up -d --build`). Ensure Docker has sufficient memory allocated (minimum 8GB recommended for the ELK stack).*
-
-### 2. Frontend Setup
-
-The visual dashboard connects to the backend to display the 3D globe and metrics.
-
+**Step 2: Start the Frontend (3D UI)**
+Open a **new** terminal window and run:
 ```bash
 cd frontend
 
@@ -70,15 +90,7 @@ npm install
 # Start the Vite development server
 npm run dev
 ```
-
-*The frontend will automatically proxy `/api` and `/ws` requests to the locally running FastAPI backend at port 8000.*
-
-## UI / UX Features
-
-* **3D Threat Globe:** An interactive WebGL globe. Hover over network lines to smartly pause rotation, and click active paths to inspect technical metadata (source, destination, threat threshold, and target processes).
-* **Spatial 'Bento' Design:** The dashboard has been engineered utilizing 2026 strict Spatial UI rules—flat opaque Zinc panels, sharp `8px` borders, brutalist layout constraints, and zero blurry gradients ensuring high FPS. 
-* **Live Incident Explanations:** The interactive 10-stage pipeline exposes dense technical explanations of what happens to a socket layer packet as it traverses an enterprise security array.
-* **Vault Credential Rotater:** When a critical threshold anomaly is captured, a HashiCorp Vault terminal automatically slides in, simulating an emergency cryptographic revocation sequence.
+Navigate to **http://localhost:5173**. The application will automatically use "Local Simulation" mode.
 
 ## Team
 HPE Code Project Interns
