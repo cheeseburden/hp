@@ -92,5 +92,17 @@ npm run dev
 ```
 Navigate to **http://localhost:5173**. The application will automatically use "Local Simulation" mode.
 
+---
+
+### Teardown (Stopping Docker) 🛑
+To gracefully stop all running containers, open a terminal in the root directory and run:
+```bash
+docker-compose down
+```
+If you wish to perform a **hard reset** and wipe all saved databases (such as Elasticsearch logs and Kafka topics) to start fresh next time, use:
+```bash
+docker-compose down -v
+```
+
 ## Team
 HPE Code Project Interns
