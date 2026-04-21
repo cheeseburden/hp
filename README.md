@@ -1,8 +1,7 @@
-# ANTI-HPE: Enterprise Network Threat Detection Pipeline
+# HPE: Enterprise Network Threat Detection Pipeline
 
-![HPE Threat Dashboard](frontend/public/favicon.ico) <!-- Placeholder, replace with real screenshot if available later -->
 
-ANTI-HPE is a production-grade, AI-powered cybersecurity threat detection pipeline. It simulates a modern Security Operations Center (SOC) backend and visualizes real-time network traffic interceptions via a stunning 3D WebGL interface and a Structural Spatial (Bento Box) dashboard.
+HPE is a production-grade, AI-powered cybersecurity threat detection pipeline. It simulates a modern Security Operations Center (SOC) backend and visualizes real-time network traffic interceptions via a stunning 3D WebGL interface and a Structural Spatial (Bento Box) dashboard.
 
 ## Overview
 
