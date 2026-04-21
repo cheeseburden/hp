@@ -46,6 +46,8 @@ This method will automatically download, build, and orchestrate all 6 containers
    ```bash
    docker-compose up --build
    ```
+   *(Note: It may take 30-60 seconds for the infrastructure healthchecks—specifically Vault and Elastic—to initialize during the first boot. Please wait until they report as "Healthy".)*
+
 3. Once all systems are healthy, open your browser and navigate to:
    **http://localhost:5173**
 
