@@ -53,3 +53,35 @@ async def get_pipeline_metrics():
         },
         attack_types=metrics.get("attack_types", {}),
     )
+
+
+@router.get("/vault/credentials")
+async def get_vault_credentials():
+    """Get current Vault credentials (masked) for frontend display."""
+    return vault_client.get_visible_credentials()
+
+
+@router.get("/vault/users")
+async def get_all_vault_users(role: str = None, region: str = None):
+    """
+    Get masked credentials for ALL 200 users stored in Vault.
+    Optional query params: ?role=Developer&region=US-East
+    """
+    all_creds = vault_client.get_all_user_credentials()
+
+    if role:
+        all_creds = [c for c in all_creds if c.get("role", "").lower() == role.lower()]
+    if region:
+        all_creds = [c for c in all_creds if c.get("home_region", "").lower() == region.lower()]
+
+    return {
+        "total_users": len(all_creds),
+        "global_rotation_count": vault_client.get_rotation_count(),
+        "users": all_creds,
+    }
+
+
+@router.get("/vault/users/{user_id}")
+async def get_vault_user(user_id: str):
+    """Get masked credentials for a specific user from Vault."""
+    return vault_client.get_user_credentials(user_id)
