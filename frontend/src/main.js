@@ -31,6 +31,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Render dashboard
   renderDashboard('dashboard-content');
 
+  // Initialize HUD from backend metrics (persisted across reloads)
+  initHUDFromBackend();
+
   // Start health polling
   updateHealth();
   updateModelMetrics();
@@ -216,42 +219,40 @@ function startInternalDemo() {
   console.log('[HPE] Starting internal demo mode (no backend)');
 
   const demoEvents = [
-    { user: 'john.smith', source_ip: '10.2.3.50', destination_ip: '10.1.0.10', event_type: 'network_connection', process_name: 'chrome.exe', hostname: 'WS-NYC-001' },
-    { user: 'svc_backup', source_ip: '10.3.1.20', destination_ip: '10.1.0.5', event_type: 'process_start', process_name: 'backup_agent.exe', hostname: 'SRV-SF-010' },
-    { user: 'alice.wong', source_ip: '10.4.2.100', destination_ip: '10.1.0.15', event_type: 'file_access', process_name: 'explorer.exe', hostname: 'WS-LDN-022' },
-    { user: 'daniel.davis004', source_ip: '10.2.3.69', destination_ip: '10.1.0.10', event_type: 'network_connection', process_name: 'powershell.exe', hostname: 'WS-SAL-0005', command_line: 'Test-NetConnection -ComputerName app_db -Port 1433' },
+    { user_id: 'USR-0175', source_ip: '109.223.221.101', ip_region: 'Asia-Pacific', user_region: 'Asia-Pacific', action: 'write', anomaly_type: 'None', geo_mismatch: false },
+    { user_id: 'USR-0080', source_ip: '129.74.149.115', ip_region: 'Asia-Pacific', user_region: 'Asia-Pacific', action: 'read', anomaly_type: 'data_exfiltration', geo_mismatch: false },
+    { user_id: 'USR-0057', source_ip: '140.56.194.153', ip_region: 'EU-Central', user_region: 'US-East', action: 'read', anomaly_type: 'impossible_travel', geo_mismatch: true },
+    { user_id: 'USR-0032', source_ip: '162.245.203.53', ip_region: 'US-East', user_region: 'US-East', action: 'admin', anomaly_type: 'brute_force', geo_mismatch: false },
   ];
 
   const geoMap = {
-    '10.1.': { lat: 12.97, lng: 77.59, city: 'Bangalore' },
-    '10.2.': { lat: 40.71, lng: -74.01, city: 'New York' },
-    '10.3.': { lat: 37.77, lng: -122.42, city: 'San Francisco' },
-    '10.4.': { lat: 51.51, lng: -0.13, city: 'London' },
+    'US-East': { lat: 40.71, lng: -74.01, city: 'New York' },
+    'US-West': { lat: 37.77, lng: -122.42, city: 'San Francisco' },
+    'EU-Central': { lat: 50.11, lng: 8.68, city: 'Frankfurt' },
+    'Asia-Pacific': { lat: 1.35, lng: 103.82, city: 'Singapore' },
+    'South-America': { lat: -23.55, lng: -46.63, city: 'São Paulo' },
   };
 
-  function ipToGeo(ip) {
-    for (const [prefix, geo] of Object.entries(geoMap)) {
-      if (ip && ip.startsWith(prefix)) return geo;
-    }
-    return { lat: 0, lng: 0, city: 'Unknown' };
+  function regionToGeo(region) {
+    return geoMap[region] || { lat: 0, lng: 0, city: 'Unknown' };
   }
 
   let idx = 0;
   const runDemo = () => {
     const event = demoEvents[idx % demoEvents.length];
-    const isThreat = event.process_name === 'powershell.exe' && event.command_line;
+    const isThreat = event.anomaly_type && event.anomaly_type !== 'None';
 
     const prediction = {
       event_id: `demo-${idx}`,
       is_threat: isThreat,
-      threat_score: isThreat ? 0.95 : Math.random() * 0.1,
+      threat_score: isThreat ? 0.85 + Math.random() * 0.15 : Math.random() * 0.1,
       threat_action: isThreat ? 'BLOCK' : 'ALLOW',
-      xgb_score: isThreat ? 0.98 : Math.random() * 0.05,
-      lgb_score: isThreat ? 0.92 : Math.random() * 0.08,
-      ensemble_score: isThreat ? 0.95 : Math.random() * 0.06,
-      threshold: 1.0,
-      source_geo: ipToGeo(event.source_ip),
-      destination_geo: ipToGeo(event.destination_ip),
+      xgb_score: isThreat ? 0.90 : Math.random() * 0.05,
+      lgb_score: isThreat ? 0.88 : Math.random() * 0.08,
+      ensemble_score: isThreat ? 0.89 : Math.random() * 0.06,
+      threshold: 0.5455,
+      source_geo: regionToGeo(event.ip_region),
+      destination_geo: { lat: 12.97, lng: 77.59, city: 'Bangalore' },
       pipeline_stages: Array.from({ length: 10 }, (_, i) => ({
         stage_name: `Stage ${i + 1}`,
         latency_ms: Math.random() * 5 + 0.5,
@@ -273,6 +274,24 @@ function startInternalDemo() {
 // ── Globe HUD Updates ─────────────────────────────────────────────────────────
 let hudTotalEvents = 0;
 let hudTotalThreats = 0;
+
+async function initHUDFromBackend() {
+  try {
+    const res = await fetch('/api/health');
+    if (!res.ok) return;
+    const data = await res.json();
+    hudTotalEvents = data.total_requests || 0;
+    hudTotalThreats = data.total_threats_blocked || 0;
+
+    const totalEl = document.getElementById('hud-event-count');
+    const threatEl = document.getElementById('hud-threat-count');
+    if (totalEl) totalEl.textContent = hudTotalEvents.toLocaleString();
+    if (threatEl) threatEl.textContent = hudTotalThreats.toLocaleString();
+    console.log(`[HPE] HUD initialized: ${hudTotalEvents} events, ${hudTotalThreats} threats`);
+  } catch (e) {
+    console.warn('[HPE] Could not fetch backend metrics for HUD init');
+  }
+}
 
 function updateGlobeHUD(prediction) {
   hudTotalEvents++;

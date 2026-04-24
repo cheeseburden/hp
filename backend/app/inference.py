@@ -1,217 +1,251 @@
-"""
-inference.py — Feature engineering and ML ensemble inference.
-Mirrors the exact training pipeline from export_model.py for consistent predictions.
-"""
-
+import logging
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
-import logging
+import json
 from typing import Dict, Any, Tuple
+from collections import defaultdict
+from app.schemas import NetworkEvent
+from app.config import PROFILES_PATH
+from datetime import datetime
 
 logger = logging.getLogger("hpe.inference")
 
-# Global model artifacts (loaded once at startup)
-_artifacts = None
+_xgb_model = None
+_lgbm_model = None
+_rf_model = None
+_gb_model = None
+_label_encoders = None
+_feature_cols = None
+_weights = None
+_best_threshold = 0.5
+_is_loaded = False
+
+_user_profiles = {}
+
+# Stateful tracking for rolling features
+_user_history = defaultdict(lambda: {
+    "first_seen_ip": None,
+    "prev_ip": None,
+    "last_event_time": None,
+    "ip_hops_30m": 0,
+    "admin_actions_15m": 0,
+    "failed_30m": 0,
+    "events_1h": 0
+})
+
+def load_model(model_path: str):
+    """Load the v2 ML models, artifacts, and user profiles."""
+    global _xgb_model, _lgbm_model, _rf_model, _gb_model, _label_encoders, _feature_cols, _weights, _best_threshold, _is_loaded, _user_profiles
+
+    logger.info(f"Loading models from {model_path} ...")
+    try:
+        artifacts = joblib.load(model_path)
+        _xgb_model = artifacts["xgb_model"]
+        _lgbm_model = artifacts["lgbm_model"]
+        _rf_model = artifacts["rf_model"]
+        _gb_model = artifacts["gb_model"]
+        _label_encoders = artifacts["label_encoders"]
+        _feature_cols = artifacts["feature_cols"]
+        _weights = artifacts["weights"]
+        _best_threshold = artifacts["best_threshold"]
+        
+        # Load user profiles
+        try:
+            with open(PROFILES_PATH, 'r', encoding='utf-8') as f:
+                profiles_list = json.load(f)
+                _user_profiles = {str(p['user_id']): p for p in profiles_list}
+            logger.info(f"[OK] Loaded {len(_user_profiles)} user profiles")
+        except Exception as e:
+            logger.error(f"[ERROR] Failed to load user profiles: {e}")
+            _user_profiles = {}
+        
+        _is_loaded = True
+        logger.info(f"[OK] ML models loaded successfully. Best threshold: {_best_threshold:.4f}")
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to load models: {e}")
 
 
-def load_model(model_path: str) -> Dict[str, Any]:
-    """Load the serialized pipeline artifacts into memory."""
-    global _artifacts
-    logger.info(f"Loading model artifacts from {model_path} ...")
-    _artifacts = joblib.load(model_path)
-    logger.info(f"Model loaded: {len(_artifacts['feature_names'])} features, "
-                f"thresholds: {_artifacts['thresholds']}")
-    return _artifacts
-
-
-def get_artifacts() -> Dict[str, Any]:
-    """Get the loaded model artifacts."""
-    return _artifacts
-
-
-# ── IP → Geo-coordinate mapping (same as export_model.py) ─────────────────────
-GEO_IP_MAP = {
-    "10.1.": {"lat": 12.97, "lng": 77.59, "city": "Bangalore"},
-    "10.2.": {"lat": 40.71, "lng": -74.01, "city": "New York"},
-    "10.3.": {"lat": 37.77, "lng": -122.42, "city": "San Francisco"},
-    "10.4.": {"lat": 51.51, "lng": -0.13, "city": "London"},
-    "10.5.": {"lat": 35.68, "lng": 139.69, "city": "Tokyo"},
-    "10.6.": {"lat": 48.86, "lng": 2.35, "city": "Paris"},
-    "10.7.": {"lat": -33.87, "lng": 151.21, "city": "Sydney"},
-    "10.8.": {"lat": 1.35, "lng": 103.82, "city": "Singapore"},
-    "10.9.": {"lat": 55.75, "lng": 37.62, "city": "Moscow"},
-    "10.10.": {"lat": 52.52, "lng": 13.41, "city": "Berlin"},
-    "10.0.": {"lat": 19.08, "lng": 72.88, "city": "Mumbai"},
-    "192.168.": {"lat": -23.55, "lng": -46.63, "city": "Sao Paulo"},
-    "172.16.": {"lat": 25.20, "lng": 55.27, "city": "Dubai"},
-}
-
-
-def ip_to_geo(ip: str) -> dict:
-    """Map an IP to a geo-coordinate for visualization."""
-    if not ip or ip == "UNKNOWN":
-        return {"lat": 0.0, "lng": 0.0, "city": "Unknown"}
-    for prefix, geo in GEO_IP_MAP.items():
-        if ip.startswith(prefix):
-            return geo
-    hash_val = hash(ip) % 360
-    return {"lat": float((hash_val % 180) - 90), "lng": float((hash_val % 360) - 180), "city": "Remote"}
-
-
-def engineer_single_event(event: Dict[str, Any]) -> np.ndarray:
-    """
-    Engineer features for a single event using pre-computed global stats.
-    Must produce the exact same feature vector as the training pipeline.
-    """
-    if _artifacts is None:
-        raise RuntimeError("Model not loaded. Call load_model() first.")
-
-    freq_maps = _artifacts["freq_maps"]
-    global_stats = _artifacts["global_stats"]
-    feature_names = _artifacts["feature_names"]
-
-    # ── Parse basic fields ──
-    success = 1 if event.get("success") in ("true", True, "1", 1) else 0
-    service_account = 1 if event.get("service_account") in ("true", True, "1", 1) else 0
-    signed = 1 if event.get("signed") in ("true", True, "1", 1) else 0
-
-    prevalence_score = _safe_float(event.get("prevalence_score", 0))
-    file_size = _safe_float(event.get("file_size", 0))
-    port = _safe_float(event.get("port", 0))
-    confidence_level = _safe_float(event.get("confidence_level", 0))
-
-    # ── Temporal features ──
-    ts = pd.to_datetime(event.get("timestamp", ""), errors="coerce")
-    if pd.isna(ts):
-        ts = pd.Timestamp.now()
-
-    hour = ts.hour
-    minute = ts.minute
-    day_of_week = ts.dayofweek
-    is_business_hours = 1 if 8 <= hour <= 18 else 0
-    is_weekend = 1 if day_of_week >= 5 else 0
-
-    # ── Frequency encoding ──
-    freq_cols_list = _artifacts.get("freq_cols", [])
-    freq_features = {}
-    for col in freq_cols_list:
-        val = str(event.get(col, "UNKNOWN") or "UNKNOWN")
-        fmap = freq_maps.get(col, {})
-        freq_features[f"{col}_freq"] = fmap.get(val, 0.0)
-
-    # ── Aggregate lookups ──
-    user = str(event.get("user", "UNKNOWN") or "UNKNOWN")
-    hostname = str(event.get("hostname", "UNKNOWN") or "UNKNOWN")
-
-    user_event_count = global_stats.get("user_cnt", {}).get(user, 0)
-    user_unique_dst_ips = global_stats.get("user_unique_dst", {}).get(user, 0)
-    user_unique_processes = global_stats.get("user_unique_proc", {}).get(user, 0)
-    user_success_rate = global_stats.get("user_suc_rate", {}).get(user, 0.0)
-    hostname_event_count = global_stats.get("host_cnt", {}).get(hostname, 0)
-
-    # ── Per (user, hour_bucket) ──
-    hour_bucket = str(ts.floor("h"))
-    uh_key = f"{user}||{hour_bucket}"
-    user_hourly_event_rate = global_stats.get("uh_cnt", {}).get(uh_key, 0)
-    user_hourly_unique_dst = global_stats.get("uh_unique_dst", {}).get(uh_key, 0)
-
-    # ── Rare indicators ──
-    process_name = str(event.get("process_name", "UNKNOWN") or "UNKNOWN")
-    event_type = str(event.get("event_type", "UNKNOWN") or "UNKNOWN")
-
-    pn_freq = freq_maps.get("process_name", {}).get(process_name, 0.0)
-    is_rare_process = 1 if pn_freq <= global_stats.get("rare_proc_thr", 0) else 0
-
-    et_freq = freq_maps.get("event_type", {}).get(event_type, 0.0)
-    is_rare_event_type = 1 if et_freq <= global_stats.get("rare_et_thr", 0) else 0
-
-    # ── Session ──
-    session_id = str(event.get("session_id", "") or "")
-    session_event_count = global_stats.get("sess_cnt", {}).get(session_id, 0) if session_id else 0
-
-    # ── Command line length ──
-    cmd = str(event.get("command_line", "") or "")
-    cmd_len = len(cmd)
-
-    # ── Build feature vector in EXACT training order ──
-    feature_dict = {
-        "success": float(success),
-        "service_account": float(service_account),
-        "signed": float(signed),
-        "prevalence_score": float(prevalence_score),
-        "file_size": float(file_size),
-        "port": float(port),
-        "confidence_level": float(confidence_level),
-        "hour": float(hour),
-        "minute": float(minute),
-        "day_of_week": float(day_of_week),
-        "is_business_hours": float(is_business_hours),
-        "is_weekend": float(is_weekend),
+def get_artifacts():
+    """Return artifacts dict if loaded, None otherwise. Used by health checks."""
+    if not _is_loaded:
+        return None
+    return {
+        "feature_cols": _feature_cols,
+        "weights": _weights,
+        "best_threshold": _best_threshold,
+        "metrics": {},
     }
 
-    # Add frequency features
-    feature_dict.update({k: float(v) for k, v in freq_features.items()})
+def engineer_single_event(event: NetworkEvent) -> pd.DataFrame:
+    """Engineer the 46 features required by the v2 models."""
+    try:
+        # Merge profile
+        user_id = str(event.user_id)
+        profile = _user_profiles.get(user_id, {})
+        
+        # Base DataFrame with single row
+        df = pd.DataFrame([{
+            'login_hour': event.login_hour,
+            'failed_attempts_last_15m': event.failed_attempts_last_15m,
+            'data_downloaded_mb': event.data_downloaded_mb,
+            'ip_region': event.ip_region,
+            'action': event.action,
+            'success': event.success,
+            'geo_mismatch': event.geo_mismatch,
+            'impossible_travel': event.impossible_travel,
+            'user_region': event.user_region,
+            'source_ip': event.source_ip,
+            'timestamp': event.timestamp,
+        }])
+        
+        # Merge profile fields
+        df['base_login_hour'] = profile.get('base_login_hour', 9.0)
+        df['login_hour_std_dev'] = profile.get('login_hour_std_dev', 2.0)
+        df['role'] = profile.get('role', 'Sales')
+        df['is_shift_worker'] = profile.get('is_shift_worker', False)
+        df['home_region'] = profile.get('home_region', df['user_region'].iloc[0])
+        df['avg_daily_downloads_mb'] = profile.get('avg_daily_downloads_mb', 50.0)
+        df['remote_worker'] = profile.get('remote_worker', False)
 
-    # Add aggregate features
-    feature_dict["user_event_count"] = float(user_event_count)
-    feature_dict["user_unique_dst_ips"] = float(user_unique_dst_ips)
-    feature_dict["user_unique_processes"] = float(user_unique_processes)
-    feature_dict["user_success_rate"] = float(user_success_rate)
-    feature_dict["hostname_event_count"] = float(hostname_event_count)
-    feature_dict["user_hourly_event_rate"] = float(user_hourly_event_rate)
-    feature_dict["user_hourly_unique_dst"] = float(user_hourly_unique_dst)
-    feature_dict["is_rare_process"] = float(is_rare_process)
-    feature_dict["is_rare_event_type"] = float(is_rare_event_type)
-    feature_dict["session_event_count"] = float(session_event_count)
-    feature_dict["cmd_len"] = float(cmd_len)
+        timestamp = pd.to_datetime(df['timestamp'].iloc[0])
+        df['hour'] = timestamp.hour
+        df['day_of_week'] = timestamp.dayofweek
+        df['is_weekend'] = int(timestamp.dayofweek >= 5)
+        df['is_night'] = int(df['hour'].iloc[0] < 6 or df['hour'].iloc[0] > 22)
 
-    # Build numpy array in exact feature order
-    vector = np.array([feature_dict.get(f, 0.0) for f in feature_names], dtype=np.float32)
-    return vector.reshape(1, -1)
+        time_diff = abs(df['login_hour'].iloc[0] - df['base_login_hour'].iloc[0])
+        time_dev = min(time_diff, 24 - time_diff)
+        df['login_time_deviation'] = time_dev
+        df['login_deviation_zscore'] = time_dev / (df['login_hour_std_dev'].iloc[0] + 0.1)
+        df['login_deviation_squared'] = time_dev ** 2
+        df['extreme_time_deviation'] = int(df['login_deviation_zscore'].iloc[0] > 2.5)
+
+        df['hour_sin'] = np.sin(2 * np.pi * df['hour'].iloc[0] / 24)
+        df['hour_cos'] = np.cos(2 * np.pi * df['hour'].iloc[0] / 24)
+
+        typical_start, typical_end = 6, 20
+        df['outside_business_hours'] = int(df['hour'].iloc[0] < typical_start or df['hour'].iloc[0] > typical_end)
+        df['non_tech_off_hours'] = int(df['outside_business_hours'].iloc[0] == 1 and df['role'].iloc[0] not in ['Admin', 'Developer'])
+        df['deep_night'] = int(1 <= df['hour'].iloc[0] <= 5)
+
+        df['shift_worker_int'] = int(df['is_shift_worker'].iloc[0])
+        df['off_hours_non_shift'] = int(df['outside_business_hours'].iloc[0] == 1 and df['shift_worker_int'].iloc[0] == 0)
+
+        df['geo_mismatch_int'] = int(df['geo_mismatch'].iloc[0])
+        df['impossible_travel_int'] = int(df['impossible_travel'].iloc[0])
+        df['from_home_region'] = int(df['ip_region'].iloc[0] == df['home_region'].iloc[0])
+
+        df['download_deviation'] = df['data_downloaded_mb'].iloc[0] - df['avg_daily_downloads_mb'].iloc[0]
+        df['download_ratio'] = df['data_downloaded_mb'].iloc[0] / (df['avg_daily_downloads_mb'].iloc[0] + 0.01)
+        df['download_deviation_abs'] = abs(df['download_deviation'].iloc[0])
+        df['is_extreme_download'] = int(df['download_ratio'].iloc[0] > 5)
+
+        df['has_failed_attempts'] = int(df['failed_attempts_last_15m'].iloc[0] > 0)
+        df['high_failed_attempts'] = int(df['failed_attempts_last_15m'].iloc[0] >= 5)
+        df['very_high_failed'] = int(df['failed_attempts_last_15m'].iloc[0] >= 8)
+        df['success_int'] = int(df['success'].iloc[0])
+        
+        hist = _user_history[user_id]
+        
+        # New IP?
+        if hist["first_seen_ip"] is None:
+            hist["first_seen_ip"] = df['source_ip'].iloc[0]
+        df['is_new_ip'] = int(df['source_ip'].iloc[0] == hist["first_seen_ip"])
+        
+        ip_changed = 0
+        if hist["prev_ip"] is not None and hist["prev_ip"] != df['source_ip'].iloc[0]:
+            ip_changed = 1
+        hist["prev_ip"] = df['source_ip'].iloc[0]
+        
+        # Very simple decay (assumes events come somewhat chronologically in test stream)
+        hist["ip_hops_30m"] = min(hist["ip_hops_30m"] + ip_changed, 10)
+        df['ip_hops_30m'] = hist["ip_hops_30m"]
+        
+        is_admin_action = int(df['action'].iloc[0] == 'admin')
+        hist["admin_actions_15m"] = min(hist["admin_actions_15m"] + is_admin_action, 20)
+        df['admin_actions_15m'] = hist["admin_actions_15m"]
+        
+        failed_action = 1 - df['success_int'].iloc[0]
+        hist["failed_30m"] = min(hist["failed_30m"] + failed_action, 20)
+        df['failed_30m'] = hist["failed_30m"]
+        
+        # Time since last
+        if hist["last_event_time"] is None:
+            time_since_last = 0.0
+        else:
+            time_since_last = (timestamp - hist["last_event_time"]).total_seconds()
+        hist["last_event_time"] = timestamp
+        
+        df['time_since_last'] = time_since_last
+        df['rapid_succession'] = int(time_since_last < 60)
+        
+        hist["events_1h"] = min(hist["events_1h"] + 1, 100)
+        df['events_1h'] = hist["events_1h"]
+
+        role_risk = {'Admin': 4, 'Developer': 3, 'Finance': 2, 'HR': 1, 'Sales': 1}
+        df['role_risk_score'] = role_risk.get(df['role'].iloc[0], 1)
+        df['remote_worker_int'] = int(df['remote_worker'].iloc[0])
+
+        df['admin_non_admin_role'] = int(is_admin_action == 1 and df['role'].iloc[0] != 'Admin')
+        df['high_download_non_dev'] = int(df['download_ratio'].iloc[0] > 3 and df['role'].iloc[0] != 'Developer')
+        df['geo_not_travel'] = int(df['geo_mismatch_int'].iloc[0] == 1 and df['impossible_travel_int'].iloc[0] == 0)
+        df['geo_and_travel'] = int(df['geo_mismatch_int'].iloc[0] == 1 and df['impossible_travel_int'].iloc[0] == 1)
+
+        # Encoders
+        for col in ['action', 'ip_region', 'user_region', 'role']:
+            le = _label_encoders.get(col)
+            val = str(df[col].iloc[0])
+            if le is not None:
+                try:
+                    encoded = le.transform([val])[0]
+                except ValueError:
+                    encoded = 0  # Unknown category
+                df[f'{col}_encoded'] = encoded
+            else:
+                df[f'{col}_encoded'] = 0
+
+        # Ensure correct column order and type
+        missing = [c for c in _feature_cols if c not in df.columns]
+        for c in missing:
+            df[c] = 0.0
+            
+        return df[_feature_cols].astype(float)
+
+    except Exception as e:
+        logger.error(f"Feature engineering failed: {e}")
+        # Return zeros matching feature columns to prevent pipeline crash
+        return pd.DataFrame(np.zeros((1, len(_feature_cols))), columns=_feature_cols)
 
 
-def predict(event: Dict[str, Any]) -> Tuple[float, float, float, float, bool]:
+def predict(event: NetworkEvent) -> Tuple[bool, float, float, float, float]:
     """
-    Run the full ensemble inference on a single event.
-    Returns: (xgb_score, lgb_score, ensemble_score, threshold, is_threat)
+    Run prediction on a single network event.
+    Returns: (is_threat, ensemble_score, xgb_score, lgbm_score, threshold)
     """
-    if _artifacts is None:
-        raise RuntimeError("Model not loaded.")
+    if not _is_loaded:
+        logger.warning("Models not loaded. Running in fallback mode.")
+        return False, 0.0, 0.0, 0.0, 0.5
 
-    # Feature engineering
     X = engineer_single_event(event)
 
-    # Scale
-    scaler = _artifacts["scaler"]
-    X_scaled = scaler.transform(X)
-
-    # Isolation Forest score
-    iso = _artifacts["iso_forest"]
-    iso_score = iso.decision_function(X_scaled).reshape(-1, 1)
-    X_aug = np.hstack([X_scaled, iso_score])
-
-    # XGBoost prediction
-    xgb_model = _artifacts["xgb_model"]
-    xgb_proba = float(xgb_model.predict_proba(X_aug)[0, 1])
-
-    # LightGBM prediction
-    lgb_model = _artifacts["lgb_model"]
-    lgb_proba = float(lgb_model.predict_proba(X_aug)[0, 1])
-
-    # Ensemble (soft vote)
-    ensemble_proba = 0.5 * xgb_proba + 0.5 * lgb_proba
-
-    # Threshold
-    threshold = _artifacts["thresholds"]["ensemble"]
-    is_threat = ensemble_proba >= threshold
-
-    return xgb_proba, lgb_proba, ensemble_proba, threshold, is_threat
-
-
-def _safe_float(val, default=0.0) -> float:
-    """Safely convert a value to float."""
     try:
-        return float(val) if val is not None and val != "" else default
-    except (ValueError, TypeError):
-        return default
+        # Get probability scores
+        prob_xgb = float(_xgb_model.predict_proba(X)[0, 1])
+        prob_lgbm = float(_lgbm_model.predict_proba(X)[0, 1])
+        prob_rf = float(_rf_model.predict_proba(X)[0, 1])
+        prob_gb = float(_gb_model.predict_proba(X)[0, 1])
+
+        # Weighted ensemble
+        ensemble_score = float((_weights['xgb'] * prob_xgb) + 
+                               (_weights['lgbm'] * prob_lgbm) + 
+                               (_weights['rf'] * prob_rf) + 
+                               (_weights['gb'] * prob_gb))
+
+        is_threat = ensemble_score >= _best_threshold
+
+        return is_threat, ensemble_score, prob_xgb, prob_lgbm, _best_threshold
+
+    except Exception as e:
+        logger.error(f"Prediction failed: {e}")
+        return False, 0.0, 0.0, 0.0, 0.5

@@ -6,6 +6,7 @@ Handles event streaming through the pipeline.
 import json
 import logging
 import threading
+import asyncio
 from typing import Optional, Callable, Dict, Any
 from confluent_kafka import Producer, Consumer, KafkaError, KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
@@ -17,6 +18,10 @@ _producer: Optional[Producer] = None
 _consumer: Optional[Consumer] = None
 _admin: Optional[AdminClient] = None
 _connected = False
+_consumer_thread: Optional[threading.Thread] = None
+_consumer_running = False
+_result_queue: Optional[asyncio.Queue] = None
+
 
 
 def connect_kafka() -> bool:
@@ -126,9 +131,75 @@ def _delivery_callback(err, msg):
 def disconnect_kafka():
     """Clean shutdown of Kafka connections."""
     global _producer, _consumer, _connected
+    stop_consumer()
     if _producer:
         _producer.flush(timeout=5)
     if _consumer:
         _consumer.close()
     _connected = False
     logger.info("Kafka disconnected")
+
+
+def start_consumer(process_callback: Callable, loop: asyncio.AbstractEventLoop, 
+                   result_queue: asyncio.Queue):
+    """Start a background thread that consumes from hpe-raw-events."""
+    global _consumer_thread, _consumer_running, _result_queue
+    _result_queue = result_queue
+    _consumer_running = True
+    
+    _consumer_thread = threading.Thread(
+        target=_consumer_loop, 
+        args=(process_callback, loop, result_queue),
+        daemon=True
+    )
+    _consumer_thread.start()
+    logger.info("Kafka consumer thread started")
+
+
+def _consumer_loop(process_callback, loop, result_queue):
+    """Blocking consumer loop — runs in a separate thread."""
+    global _consumer_running
+    
+    if not _consumer:
+        logger.error("Consumer not initialized")
+        return
+    
+    _consumer.subscribe([KAFKA_RAW_EVENTS_TOPIC])
+    logger.info(f"Subscribed to {KAFKA_RAW_EVENTS_TOPIC}")
+    
+    while _consumer_running:
+        try:
+            msg = _consumer.poll(timeout=1.0)  # Block for 1 second max
+            if msg is None:
+                continue
+            if msg.error():
+                logger.error(f"Consumer error: {msg.error()}")
+                continue
+            
+            # Deserialize the event
+            raw = json.loads(msg.value().decode("utf-8"))
+            logger.info(f"Consumed event from partition {msg.partition()} offset {msg.offset()}")
+            
+            # Process through the pipeline (ML + Vault + ES)
+            result = process_callback(raw)
+            
+            # Push result to async queue (thread-safe bridge)
+            asyncio.run_coroutine_threadsafe(
+                result_queue.put(result),
+                loop
+            )
+            
+        except Exception as e:
+            logger.error(f"Consumer loop error: {e}")
+    
+    logger.info("Consumer loop stopped")
+
+
+def stop_consumer():
+    """Stop the background consumer."""
+    global _consumer_running
+    _consumer_running = False
+    if _consumer_thread:
+        _consumer_thread.join(timeout=5)
+    logger.info("Kafka consumer stopped")
+

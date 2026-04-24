@@ -12,6 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import APP_NAME, APP_TAGLINE, APP_VERSION, MODEL_PATH
 from app import inference, kafka_client, elastic_client, vault_client
 from app.routes import predict, health, pipeline, simulate
+import asyncio
+from app.ws_manager import manager as ws_manager
+from app.threat_engine import process_raw_event
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -68,6 +71,35 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[WARN] Vault unavailable: {e}")
 
+    # Start Kafka consumer if connected
+    result_queue = asyncio.Queue()
+    broadcast_task = None
+    
+    if kafka_client.is_connected():
+        loop = asyncio.get_running_loop()
+        kafka_client.start_consumer(
+            process_callback=process_raw_event,
+            loop=loop,
+            result_queue=result_queue,
+        )
+        logger.info("[OK] Kafka consumer started")
+        
+        async def broadcast_results():
+            while True:
+                try:
+                    result = await result_queue.get()
+                    await ws_manager.broadcast({
+                        "type": "pipeline_result",
+                        "data": {
+                            "event": result.event_summary,
+                            "prediction": result.model_dump(),
+                        }
+                    })
+                except Exception as e:
+                    logger.error(f"Broadcast error: {e}")
+        
+        broadcast_task = asyncio.create_task(broadcast_results())
+
     logger.info(f"\n  Pipeline ready. Serving on http://0.0.0.0:8000")
     logger.info(f"  Docs:  http://localhost:8000/docs")
     logger.info(f"{'='*60}\n")
@@ -77,6 +109,8 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down HPE Pipeline...")
     kafka_client.disconnect_kafka()
+    if broadcast_task:
+        broadcast_task.cancel()
     elastic_client.disconnect_elasticsearch()
     vault_client.disconnect_vault()
     logger.info("Shutdown complete.")
