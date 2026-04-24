@@ -97,8 +97,9 @@ services:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=hpe-dev-token
-      - MODEL_PATH=/app/model_output/pipeline_artifacts.joblib
-      - SAMPLE_EVENTS_PATH=/app/model_output/sample_events.json
+      - MODEL_PATH=/app/model_output/pipeline_artifacts_v2.joblib
+      - TEST_EVENTS_PATH=/app/model_output/test_events.json
+      - PROFILES_PATH=/app/model_output/user_profiles.json
     volumes:
       - ./model_output:/app/model_output:ro
     depends_on:
