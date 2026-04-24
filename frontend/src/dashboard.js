@@ -155,11 +155,114 @@ export function renderDashboard(containerId) {
         </div>
         
     </div>
+
+    <!-- Kafka & Elasticsearch Stats Row -->
+    <div style="display: flex; gap: var(--space-xl); margin-top: var(--space-2xl);">
+        <!-- Kafka Stats -->
+        <div style="flex: 1;">
+          <div class="section-title">Apache Kafka — Live Stats</div>
+          <div class="infra-stats-card" id="kafka-stats-card">
+            <div class="infra-stats-grid">
+              <div class="infra-stat">
+                <span class="infra-stat-label">Brokers</span>
+                <span class="infra-stat-value" id="kafka-brokers">—</span>
+              </div>
+              <div class="infra-stat">
+                <span class="infra-stat-label">Topics</span>
+                <span class="infra-stat-value" id="kafka-topics">—</span>
+              </div>
+              <div class="infra-stat">
+                <span class="infra-stat-label">Total Messages</span>
+                <span class="infra-stat-value cyan" id="kafka-total-msgs">—</span>
+              </div>
+              <div class="infra-stat">
+                <span class="infra-stat-label">Consumer Lag</span>
+                <span class="infra-stat-value" id="kafka-lag">—</span>
+              </div>
+            </div>
+            <div id="kafka-partitions" style="margin-top: var(--space-md); font-family: var(--font-mono); font-size: 11px;"></div>
+          </div>
+        </div>
+
+        <!-- Elasticsearch Stats -->
+        <div style="flex: 1;">
+          <div class="section-title">Elasticsearch — Index Stats</div>
+          <div class="infra-stats-card" id="es-stats-card">
+            <div class="infra-stats-grid">
+              <div class="infra-stat">
+                <span class="infra-stat-label">Audit Logs</span>
+                <span class="infra-stat-value lime" id="es-audit-count">—</span>
+              </div>
+              <div class="infra-stat">
+                <span class="infra-stat-label">Threats Indexed</span>
+                <span class="infra-stat-value magenta" id="es-threats-count">—</span>
+              </div>
+            </div>
+            <div id="es-threat-breakdown" style="margin-top: var(--space-md); font-family: var(--font-mono); font-size: 11px;"></div>
+          </div>
+        </div>
+    </div>
+
+    <!-- Vault Users Table -->
+    <div style="margin-top: var(--space-2xl);">
+      <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>🔐 HashiCorp Vault — 200 User Credentials</span>
+        <span id="vault-user-count" style="font-size: 12px; color: var(--text-muted); font-weight: 400;"></span>
+      </div>
+      <div class="vault-table-controls">
+        <input type="text" id="vault-search" placeholder="Search user ID..." class="vault-search-input" />
+        <select id="vault-role-filter" class="vault-filter-select">
+          <option value="">All Roles</option>
+          <option value="Admin">Admin</option>
+          <option value="Developer">Developer</option>
+          <option value="Finance">Finance</option>
+          <option value="HR">HR</option>
+          <option value="Sales">Sales</option>
+        </select>
+        <select id="vault-status-filter" class="vault-filter-select">
+          <option value="">All Status</option>
+          <option value="active">Active</option>
+          <option value="rotated">Rotated</option>
+        </select>
+      </div>
+      <div class="vault-table-wrapper">
+        <table class="vault-table" id="vault-users-table">
+          <thead>
+            <tr>
+              <th>User ID</th>
+              <th>Role</th>
+              <th>Region</th>
+              <th>DB Password</th>
+              <th>API Key</th>
+              <th>Rotations</th>
+              <th>Status</th>
+              <th>Last Reason</th>
+            </tr>
+          </thead>
+          <tbody id="vault-users-tbody">
+            <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Loading 200 users...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   `;
   
   // Start polling vault credentials
   setInterval(updateVaultCredentials, 5000);
   updateVaultCredentials();
+
+  // Start polling Kafka + ES stats
+  setInterval(updateKafkaStats, 8000);
+  setInterval(updateEsStats, 10000);
+  updateKafkaStats();
+  updateEsStats();
+
+  // Load Vault users table
+  loadVaultUsersTable();
+  setInterval(loadVaultUsersTable, 15000);
+
+  // Setup search/filter listeners
+  setupVaultTableFilters();
 
   // Initialize dashboard counters from backend metrics (persist across reloads)
   initDashboardFromBackend();
@@ -297,7 +400,6 @@ async function updateVaultCredentials() {
         
         const newCount = data.rotation_count || 0;
         if (newCount > state.vaultRotationCount) {
-            // Flash the card red on rotation
             const card = document.getElementById('vault-card');
             if (card) {
                 card.style.borderColor = 'var(--magenta)';
@@ -311,9 +413,151 @@ async function updateVaultCredentials() {
         }
         updateElement('vault-rotations', state.vaultRotationCount.toString());
         
+    } catch(e) { /* Ignore */ }
+}
+
+/**
+ * Update Kafka Stats Panel
+ */
+async function updateKafkaStats() {
+    try {
+        const res = await fetch('/api/kafka/stats');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.error) {
+            updateElement('kafka-brokers', '—');
+            return;
+        }
+
+        updateElement('kafka-brokers', data.broker_count || 0);
+        const topicCount = Object.keys(data.topics || {}).length;
+        updateElement('kafka-topics', topicCount);
+        updateElement('kafka-total-msgs', (data.total_messages_in_topics || 0).toLocaleString());
+
+        // Consumer lag
+        const lagEntries = Object.values(data.consumer_lag || {});
+        const totalLag = lagEntries.reduce((sum, l) => sum + (l.lag || 0), 0);
+        const lagEl = document.getElementById('kafka-lag');
+        if (lagEl) {
+            lagEl.textContent = totalLag.toLocaleString();
+            lagEl.className = `infra-stat-value ${totalLag > 50 ? 'magenta' : totalLag > 10 ? 'amber' : 'lime'}`;
+        }
+
+        // Partition details
+        const partDiv = document.getElementById('kafka-partitions');
+        if (partDiv && lagEntries.length > 0) {
+            partDiv.innerHTML = lagEntries.map(l => `
+                <div class="kafka-partition-row">
+                    <span style="color: var(--text-muted);">${l.topic}[${l.partition}]</span>
+                    <span style="color: var(--cyan);">offset: ${l.committed_offset}</span>
+                    <span style="color: var(--amber);">latest: ${l.latest_offset}</span>
+                    <span class="${l.lag > 10 ? 'lag-warning' : 'lag-ok'}">lag: ${l.lag}</span>
+                </div>
+            `).join('');
+        } else if (partDiv) {
+            partDiv.innerHTML = '<div style="color: var(--text-muted);">No active partitions</div>';
+        }
+    } catch(e) { /* Ignore */ }
+}
+
+/**
+ * Update Elasticsearch Stats Panel
+ */
+async function updateEsStats() {
+    try {
+        const res = await fetch('/api/elasticsearch/stats');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const docs = data.index_doc_counts || {};
+        updateElement('es-audit-count', (docs['hpe-audit-logs'] || 0).toLocaleString());
+        updateElement('es-threats-count', (docs['hpe-threats'] || 0).toLocaleString());
+
+        // Threat breakdown from aggregations
+        const breakdown = data.threat_breakdown || {};
+        const breakDiv = document.getElementById('es-threat-breakdown');
+        if (breakDiv && Object.keys(breakdown).length > 0) {
+            const entries = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
+            breakDiv.innerHTML = '<div style="color: var(--text-muted); margin-bottom: 4px;">Threat Actions:</div>' +
+                entries.map(([action, count]) => `
+                    <div style="display: flex; justify-content: space-between; padding: 2px 0;">
+                        <span style="color: var(--text-secondary);">${action}</span>
+                        <span style="color: var(--magenta);">${count}</span>
+                    </div>
+                `).join('');
+        }
+    } catch(e) { /* Ignore */ }
+}
+
+/**
+ * Load Vault Users Table
+ */
+let _allVaultUsers = [];
+
+async function loadVaultUsersTable() {
+    try {
+        const res = await fetch('/api/vault/users');
+        if (!res.ok) return;
+        const data = await res.json();
+        _allVaultUsers = data.users || [];
+        updateElement('vault-user-count', `${data.total_users} users · ${data.global_rotation_count} total rotations`);
+        renderVaultTable(_allVaultUsers);
     } catch(e) {
-        // Ignore
+        const tbody = document.getElementById('vault-users-tbody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--amber);">Vault not connected</td></tr>';
     }
+}
+
+function renderVaultTable(users) {
+    const tbody = document.getElementById('vault-users-tbody');
+    if (!tbody) return;
+
+    if (users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">No users match filters</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = users.map(u => {
+        const statusClass = u.status === 'rotated' ? 'status-rotated' : 'status-active';
+        const statusLabel = u.status === 'rotated' ? '🔄 ROTATED' : '✅ ACTIVE';
+        const reason = u.last_rotation_reason || '—';
+        const shortReason = reason.length > 25 ? reason.substring(0, 25) + '…' : reason;
+        return `
+            <tr class="vault-row ${u.status === 'rotated' ? 'row-rotated' : ''}">
+                <td class="user-id-cell">${u.user_id}</td>
+                <td><span class="role-badge role-${(u.role || '').toLowerCase()}">${u.role}</span></td>
+                <td>${u.home_region || '—'}</td>
+                <td class="mono-cell">${u.db_password || '****'}</td>
+                <td class="mono-cell">${u.api_key || '****'}</td>
+                <td style="text-align: center;">${u.rotation_count || 0}</td>
+                <td><span class="${statusClass}">${statusLabel}</span></td>
+                <td class="reason-cell" title="${reason}">${shortReason}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function setupVaultTableFilters() {
+    const search = document.getElementById('vault-search');
+    const roleFilter = document.getElementById('vault-role-filter');
+    const statusFilter = document.getElementById('vault-status-filter');
+
+    const applyFilters = () => {
+        const q = (search?.value || '').toLowerCase();
+        const role = roleFilter?.value || '';
+        const status = statusFilter?.value || '';
+
+        let filtered = _allVaultUsers;
+        if (q) filtered = filtered.filter(u => (u.user_id || '').toLowerCase().includes(q));
+        if (role) filtered = filtered.filter(u => u.role === role);
+        if (status) filtered = filtered.filter(u => u.status === status);
+
+        renderVaultTable(filtered);
+    };
+
+    search?.addEventListener('input', applyFilters);
+    roleFilter?.addEventListener('change', applyFilters);
+    statusFilter?.addEventListener('change', applyFilters);
 }
 
 function updateAttackBreakdown() {

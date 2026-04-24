@@ -1028,3 +1028,217 @@ body {
   from { opacity: 0; transform: translateX(-50%) translateY(20px) scale(0.9); }
   to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
 }
+
+/* ── Infrastructure Stats Cards (Kafka / ES) ───────────────────────────── */
+.infra-stats-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  transition: border-color 0.2s ease;
+}
+
+.infra-stats-card:hover {
+  border-color: var(--panel-border-hover);
+}
+
+.infra-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-md);
+}
+
+.infra-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.infra-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.infra-stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.infra-stat-value.cyan { color: var(--cyan); }
+.infra-stat-value.lime { color: var(--lime); }
+.infra-stat-value.magenta { color: var(--magenta); }
+.infra-stat-value.amber { color: var(--amber); }
+
+/* Kafka partition rows */
+.kafka-partition-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(63, 63, 70, 0.3);
+}
+
+.kafka-partition-row:last-child {
+  border-bottom: none;
+}
+
+.lag-ok { color: var(--lime); }
+.lag-warning { color: var(--magenta); font-weight: 600; }
+
+/* ── Vault Users Table ─────────────────────────────────────────────────── */
+.vault-table-controls {
+  display: flex;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.vault-search-input {
+  flex: 1;
+  min-width: 200px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.vault-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.vault-search-input:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.1);
+}
+
+.vault-filter-select {
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.vault-filter-select:focus {
+  border-color: var(--cyan);
+}
+
+.vault-table-wrapper {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.vault-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.vault-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.vault-table thead th {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: var(--space-sm) var(--space-md);
+  text-align: left;
+  border-bottom: 1px solid var(--panel-border);
+  white-space: nowrap;
+}
+
+.vault-table tbody tr {
+  border-bottom: 1px solid rgba(63, 63, 70, 0.3);
+  transition: background 0.15s ease;
+}
+
+.vault-table tbody tr:hover {
+  background: var(--bg-elevated);
+}
+
+.vault-table tbody td {
+  padding: var(--space-sm) var(--space-md);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.vault-row.row-rotated {
+  background: rgba(244, 63, 94, 0.04);
+}
+
+.vault-row.row-rotated:hover {
+  background: rgba(244, 63, 94, 0.08);
+}
+
+.user-id-cell {
+  color: var(--cyan) !important;
+  font-weight: 600;
+}
+
+.mono-cell {
+  color: var(--text-secondary) !important;
+  font-size: 11px;
+}
+
+.reason-cell {
+  color: var(--text-muted) !important;
+  font-size: 11px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Role badges */
+.role-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.role-admin { background: rgba(192, 132, 252, 0.15); color: var(--purple); border: 1px solid rgba(192, 132, 252, 0.3); }
+.role-developer { background: rgba(34, 211, 238, 0.15); color: var(--cyan); border: 1px solid rgba(34, 211, 238, 0.3); }
+.role-finance { background: rgba(251, 191, 36, 0.15); color: var(--amber); border: 1px solid rgba(251, 191, 36, 0.3); }
+.role-hr { background: rgba(74, 222, 128, 0.15); color: var(--lime); border: 1px solid rgba(74, 222, 128, 0.3); }
+.role-sales { background: rgba(244, 63, 94, 0.15); color: var(--magenta); border: 1px solid rgba(244, 63, 94, 0.3); }
+
+/* Status indicators */
+.status-active {
+  color: var(--lime);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.status-rotated {
+  color: var(--magenta);
+  font-size: 11px;
+  font-weight: 600;
+}
+

@@ -85,3 +85,41 @@ async def get_all_vault_users(role: str = None, region: str = None):
 async def get_vault_user(user_id: str):
     """Get masked credentials for a specific user from Vault."""
     return vault_client.get_user_credentials(user_id)
+
+
+@router.get("/kafka/stats")
+async def get_kafka_stats():
+    """Get real Kafka topic metadata, partition offsets, and consumer group lag."""
+    return kafka_client.get_topic_stats()
+
+
+@router.get("/elasticsearch/recent-threats")
+async def get_recent_threats(size: int = 20):
+    """Fetch recent threat detections from Elasticsearch."""
+    threats = elastic_client.search_recent_threats(size=size)
+    return {
+        "total": len(threats),
+        "threats": threats,
+    }
+
+
+@router.get("/elasticsearch/stats")
+async def get_es_stats():
+    """Get aggregated threat statistics from Elasticsearch."""
+    stats = elastic_client.get_threat_stats()
+
+    # Also get index document counts
+    doc_counts = {}
+    if elastic_client.is_connected() and elastic_client._es:
+        try:
+            for idx in ["hpe-audit-logs", "hpe-threats"]:
+                count = elastic_client._es.count(index=idx)
+                doc_counts[idx] = count.get("count", 0)
+        except Exception:
+            pass
+
+    return {
+        "connected": elastic_client.is_connected(),
+        "threat_breakdown": stats,
+        "index_doc_counts": doc_counts,
+    }
