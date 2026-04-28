@@ -129,13 +129,18 @@ def _delivery_callback(err, msg):
 
 
 def get_topic_stats() -> Dict[str, Any]:
-    """Get real Kafka topic metadata, partition offsets, and consumer group info."""
-    if not _admin or not _connected:
+    """Get real Kafka topic metadata, partition offsets, and consumer group info.
+    
+    Uses a fresh AdminClient and a temporary Consumer to avoid conflicts
+    with the background consumer thread that holds the shared _consumer.
+    """
+    if not _connected:
         return {"error": "Kafka not connected"}
 
     try:
-        # Get topic metadata
-        metadata = _admin.list_topics(timeout=5)
+        # Create a fresh admin client for metadata queries
+        admin = AdminClient({"bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS})
+        metadata = admin.list_topics(timeout=10)
         topics_info = {}
 
         for topic_name, topic_meta in metadata.topics.items():
@@ -154,49 +159,56 @@ def get_topic_stats() -> Dict[str, Any]:
                 "partition_count": len(partitions),
             }
 
+        # Use a temporary consumer for offset queries (the main _consumer is
+        # actively subscribed in the background thread and cannot be shared)
+        from confluent_kafka import TopicPartition
+        stats_consumer = Consumer({
+            "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
+            "group.id": "hpe-pipeline-consumer",
+            "auto.offset.reset": "latest",
+            "enable.auto.commit": False,  # read-only — don't commit
+        })
+
         # Get consumer group offsets
         consumer_lag = {}
         try:
-            from confluent_kafka import TopicPartition
-            group_id = "hpe-pipeline-consumer"
-            # List committed offsets for our consumer group
-            if _consumer:
-                for topic_name in [KAFKA_RAW_EVENTS_TOPIC, KAFKA_ALERTS_TOPIC]:
-                    if topic_name in topics_info:
-                        tp_list = [
-                            TopicPartition(topic_name, p["id"])
-                            for p in topics_info[topic_name]["partitions"]
-                        ]
-                        committed = _consumer.committed(tp_list, timeout=5)
-                        for tp in committed:
-                            if tp.offset >= 0:
-                                # Get high watermark (latest offset)
-                                lo, hi = _consumer.get_watermark_offsets(tp, timeout=5)
-                                lag = hi - tp.offset if hi >= 0 and tp.offset >= 0 else 0
-                                key = f"{tp.topic}[{tp.partition}]"
-                                consumer_lag[key] = {
-                                    "topic": tp.topic,
-                                    "partition": tp.partition,
-                                    "committed_offset": tp.offset,
-                                    "latest_offset": hi,
-                                    "lag": lag,
-                                }
+            for topic_name in [KAFKA_RAW_EVENTS_TOPIC, KAFKA_ALERTS_TOPIC]:
+                if topic_name in topics_info:
+                    tp_list = [
+                        TopicPartition(topic_name, p["id"])
+                        for p in topics_info[topic_name]["partitions"]
+                    ]
+                    committed = stats_consumer.committed(tp_list, timeout=5)
+                    for tp in committed:
+                        if tp.offset >= 0:
+                            lo, hi = stats_consumer.get_watermark_offsets(tp, timeout=5)
+                            lag = hi - tp.offset if hi >= 0 and tp.offset >= 0 else 0
+                            key = f"{tp.topic}[{tp.partition}]"
+                            consumer_lag[key] = {
+                                "topic": tp.topic,
+                                "partition": tp.partition,
+                                "committed_offset": tp.offset,
+                                "latest_offset": hi,
+                                "lag": lag,
+                            }
         except Exception as e:
             logger.warning(f"Could not fetch consumer offsets: {e}")
 
         # Count total messages produced (from watermarks)
         total_messages = 0
         for topic_name in [KAFKA_RAW_EVENTS_TOPIC, KAFKA_ALERTS_TOPIC, KAFKA_AUDIT_TOPIC]:
-            if topic_name in topics_info and _consumer:
+            if topic_name in topics_info:
                 for p_info in topics_info[topic_name]["partitions"]:
                     try:
-                        from confluent_kafka import TopicPartition as TP
-                        lo, hi = _consumer.get_watermark_offsets(
-                            TP(topic_name, p_info["id"]), timeout=5
+                        lo, hi = stats_consumer.get_watermark_offsets(
+                            TopicPartition(topic_name, p_info["id"]), timeout=5
                         )
                         total_messages += (hi - lo) if hi >= 0 and lo >= 0 else 0
                     except Exception:
                         pass
+
+        # Clean up the temporary consumer
+        stats_consumer.close()
 
         return {
             "connected": True,
