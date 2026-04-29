@@ -6,6 +6,7 @@ Handles event streaming through the pipeline.
 import json
 import logging
 import threading
+import asyncio
 from typing import Optional, Callable, Dict, Any
 from confluent_kafka import Producer, Consumer, KafkaError, KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
@@ -17,6 +18,10 @@ _producer: Optional[Producer] = None
 _consumer: Optional[Consumer] = None
 _admin: Optional[AdminClient] = None
 _connected = False
+_consumer_thread: Optional[threading.Thread] = None
+_consumer_running = False
+_result_queue: Optional[asyncio.Queue] = None
+
 
 
 def connect_kafka() -> bool:
@@ -123,12 +128,174 @@ def _delivery_callback(err, msg):
         logger.debug(f"Kafka delivered to {msg.topic()} [{msg.partition()}] @ {msg.offset()}")
 
 
+def get_topic_stats() -> Dict[str, Any]:
+    """Get real Kafka topic metadata, partition offsets, and consumer group info.
+    
+    Uses a fresh AdminClient and a temporary Consumer to avoid conflicts
+    with the background consumer thread that holds the shared _consumer.
+    """
+    if not _connected:
+        return {"error": "Kafka not connected"}
+
+    try:
+        # Create a fresh admin client for metadata queries
+        admin = AdminClient({"bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS})
+        metadata = admin.list_topics(timeout=10)
+        topics_info = {}
+
+        for topic_name, topic_meta in metadata.topics.items():
+            if topic_name.startswith("_"):  # Skip internal topics
+                continue
+            partitions = []
+            for p_id, p_meta in topic_meta.partitions.items():
+                partitions.append({
+                    "id": p_id,
+                    "leader": p_meta.leader,
+                    "replicas": list(p_meta.replicas),
+                    "isrs": list(p_meta.isrs),
+                })
+            topics_info[topic_name] = {
+                "partitions": partitions,
+                "partition_count": len(partitions),
+            }
+
+        # Use a temporary consumer for offset queries (the main _consumer is
+        # actively subscribed in the background thread and cannot be shared)
+        from confluent_kafka import TopicPartition
+        stats_consumer = Consumer({
+            "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
+            "group.id": "hpe-pipeline-consumer",
+            "auto.offset.reset": "latest",
+            "enable.auto.commit": False,  # read-only — don't commit
+        })
+
+        # Get consumer group offsets
+        consumer_lag = {}
+        try:
+            for topic_name in [KAFKA_RAW_EVENTS_TOPIC, KAFKA_ALERTS_TOPIC]:
+                if topic_name in topics_info:
+                    tp_list = [
+                        TopicPartition(topic_name, p["id"])
+                        for p in topics_info[topic_name]["partitions"]
+                    ]
+                    committed = stats_consumer.committed(tp_list, timeout=5)
+                    for tp in committed:
+                        if tp.offset >= 0:
+                            lo, hi = stats_consumer.get_watermark_offsets(tp, timeout=5)
+                            lag = hi - tp.offset if hi >= 0 and tp.offset >= 0 else 0
+                            key = f"{tp.topic}[{tp.partition}]"
+                            consumer_lag[key] = {
+                                "topic": tp.topic,
+                                "partition": tp.partition,
+                                "committed_offset": tp.offset,
+                                "latest_offset": hi,
+                                "lag": lag,
+                            }
+        except Exception as e:
+            logger.warning(f"Could not fetch consumer offsets: {e}")
+
+        # Count total messages produced (from watermarks)
+        total_messages = 0
+        for topic_name in [KAFKA_RAW_EVENTS_TOPIC, KAFKA_ALERTS_TOPIC, KAFKA_AUDIT_TOPIC]:
+            if topic_name in topics_info:
+                for p_info in topics_info[topic_name]["partitions"]:
+                    try:
+                        lo, hi = stats_consumer.get_watermark_offsets(
+                            TopicPartition(topic_name, p_info["id"]), timeout=5
+                        )
+                        total_messages += (hi - lo) if hi >= 0 and lo >= 0 else 0
+                    except Exception:
+                        pass
+
+        # Clean up the temporary consumer
+        stats_consumer.close()
+
+        return {
+            "connected": True,
+            "broker_count": len(metadata.brokers),
+            "topics": topics_info,
+            "consumer_group": "hpe-pipeline-consumer",
+            "consumer_lag": consumer_lag,
+            "total_messages_in_topics": total_messages,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get Kafka stats: {e}")
+        return {"error": str(e), "connected": _connected}
+
+
 def disconnect_kafka():
     """Clean shutdown of Kafka connections."""
     global _producer, _consumer, _connected
+    stop_consumer()
     if _producer:
         _producer.flush(timeout=5)
     if _consumer:
         _consumer.close()
     _connected = False
     logger.info("Kafka disconnected")
+
+
+def start_consumer(process_callback: Callable, loop: asyncio.AbstractEventLoop, 
+                   result_queue: asyncio.Queue):
+    """Start a background thread that consumes from hpe-raw-events."""
+    global _consumer_thread, _consumer_running, _result_queue
+    _result_queue = result_queue
+    _consumer_running = True
+    
+    _consumer_thread = threading.Thread(
+        target=_consumer_loop, 
+        args=(process_callback, loop, result_queue),
+        daemon=True
+    )
+    _consumer_thread.start()
+    logger.info("Kafka consumer thread started")
+
+
+def _consumer_loop(process_callback, loop, result_queue):
+    """Blocking consumer loop — runs in a separate thread."""
+    global _consumer_running
+    
+    if not _consumer:
+        logger.error("Consumer not initialized")
+        return
+    
+    _consumer.subscribe([KAFKA_RAW_EVENTS_TOPIC])
+    logger.info(f"Subscribed to {KAFKA_RAW_EVENTS_TOPIC}")
+    
+    while _consumer_running:
+        try:
+            msg = _consumer.poll(timeout=1.0)  # Block for 1 second max
+            if msg is None:
+                continue
+            if msg.error():
+                logger.error(f"Consumer error: {msg.error()}")
+                continue
+            
+            # Deserialize the event
+            raw = json.loads(msg.value().decode("utf-8"))
+            logger.info(f"Consumed event from partition {msg.partition()} offset {msg.offset()}")
+            
+            # Process through the pipeline (ML + Vault + ES)
+            result = process_callback(raw)
+            
+            # Push result to async queue (thread-safe bridge)
+            asyncio.run_coroutine_threadsafe(
+                result_queue.put(result),
+                loop
+            )
+            
+        except Exception as e:
+            logger.error(f"Consumer loop error: {e}")
+    
+    logger.info("Consumer loop stopped")
+
+
+def stop_consumer():
+    """Stop the background consumer."""
+    global _consumer_running
+    _consumer_running = False
+    if _consumer_thread:
+        _consumer_thread.join(timeout=5)
+    logger.info("Kafka consumer stopped")
+

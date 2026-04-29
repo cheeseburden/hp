@@ -24,30 +24,32 @@ class GeoLocation(BaseModel):
 # ── Request schemas ────────────────────────────────────────────────────────────
 class NetworkEvent(BaseModel):
     """A single network/security event from the log data."""
-    event_type: str = Field(default="unknown", description="Type of event")
-    user: str = Field(default="unknown", description="Username")
-    hostname: Optional[str] = ""
-    process_name: Optional[str] = ""
-    command_line: Optional[str] = ""
-    source_ip: Optional[str] = ""
-    destination_ip: Optional[str] = ""
-    department: Optional[str] = ""
-    location: Optional[str] = ""
-    device_type: Optional[str] = ""
-    success: Optional[str] = "true"
-    session_id: Optional[str] = ""
-    service_account: Optional[str] = "false"
-    account: Optional[str] = ""
     event_id: Optional[str] = ""
-    parent_process: Optional[str] = ""
-    prevalence_score: Optional[str] = "0.0"
-    log_type: Optional[str] = ""
     timestamp: Optional[str] = ""
-    protocol: Optional[str] = ""
-    port: Optional[str] = ""
-    file_size: Optional[str] = ""
-    confidence_level: Optional[str] = ""
-    signed: Optional[str] = "false"
+    login_hour: Optional[int] = 0
+    user_id: Optional[str] = ""
+    workspace_id: Optional[str] = ""
+    source_ip: Optional[str] = ""
+    ip_region: Optional[str] = ""
+    user_region: Optional[str] = ""
+    geo_mismatch: Optional[bool] = False
+    impossible_travel: Optional[bool] = False
+    action: Optional[str] = ""
+    success: Optional[bool] = True
+    failed_attempts_last_15m: Optional[int] = 0
+    data_downloaded_mb: Optional[float] = 0.0
+    # Profile fields (merged on the fly or pre-merged)
+    role: Optional[str] = ""
+    remote_worker: Optional[bool] = False
+    base_login_hour: Optional[float] = 9.0
+    login_hour_std_dev: Optional[float] = 2.0
+    avg_daily_downloads_mb: Optional[float] = 50.0
+    home_region: Optional[str] = ""
+    is_shift_worker: Optional[bool] = False
+    clumsiness_factor: Optional[float] = 0.0
+    # Attack metadata (for evaluation, not features)
+    is_injected_anomaly: Optional[bool] = False
+    anomaly_type: Optional[str] = "None"
 
     class Config:
         json_schema_extra = {

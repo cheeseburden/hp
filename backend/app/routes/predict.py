@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from typing import List
 from app.schemas import NetworkEvent, PredictionResult, BatchPredictRequest
 from app.threat_engine import process_event
+from app import kafka_client
 
 router = APIRouter(prefix="/api", tags=["prediction"])
 
@@ -21,6 +22,18 @@ async def predict_event(event: NetworkEvent):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+
+
+@router.post("/ingest")
+async def ingest_event(event: NetworkEvent):
+    """
+    Async ingestion — produces to Kafka.
+    Result will be broadcast via WebSocket when the consumer processes it.
+    """
+    success = kafka_client.produce_raw_event(event.model_dump())
+    kafka_client.flush()
+    return {"status": "queued" if success else "kafka_unavailable"}
+
 
 
 @router.post("/batch", response_model=List[PredictionResult])

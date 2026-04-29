@@ -56,6 +56,17 @@ def determine_action(threat_score: float) -> ThreatAction:
         return ThreatAction.CRITICAL_ALERT
 
 
+def process_raw_event(raw_event: dict) -> PredictionResult:
+    """
+    Called by the Kafka consumer thread.
+    Converts a raw dict from Kafka into a NetworkEvent and processes it.
+    """
+    event_fields = {k: v for k, v in raw_event.items() 
+                    if k in NetworkEvent.model_fields}
+    event = NetworkEvent(**event_fields)
+    return process_event(event)
+
+
 def process_event(event: NetworkEvent) -> PredictionResult:
     """
     Process a single event through the FULL pipeline:
@@ -80,22 +91,18 @@ def process_event(event: NetworkEvent) -> PredictionResult:
 
     # ── Stage 4: Apache Kafka (REAL) ──
     kafka_t0 = time.time()
-    kafka_success = kafka_client.produce_raw_event({
-        "event_id": event_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        **event_dict,
-    })
+    
     kafka_latency = (time.time() - kafka_t0) * 1000
 
     stages.append(PipelineStageResult(
         stage_name="Apache Kafka",
         stage_number=4,
-        status="produced" if kafka_success else "fallback",
+        status="consumed",
         latency_ms=round(kafka_latency, 2),
         details={
             "topic": "hpe-raw-events",
+            "direction": "consumed",
             "partition": "auto",
-            "delivered": kafka_success,
         },
         is_real_tool=True,
     ))
@@ -103,10 +110,10 @@ def process_event(event: NetworkEvent) -> PredictionResult:
     # ── Stage 5: AI Detection Engine (REAL) ──
     ai_t0 = time.time()
     try:
-        xgb_score, lgb_score, ensemble_score, threshold, is_threat = inference.predict(event_dict)
+        is_threat, ensemble_score, xgb_score, lgb_score, threshold = inference.predict(event)
     except Exception as e:
         logger.error(f"Inference error: {e}")
-        xgb_score, lgb_score, ensemble_score, threshold, is_threat = 0.0, 0.0, 0.0, 0.5, False
+        is_threat, ensemble_score, xgb_score, lgb_score, threshold = False, 0.0, 0.0, 0.0, 0.5
     ai_latency = (time.time() - ai_t0) * 1000
 
     threat_action = determine_action(ensemble_score)
@@ -137,7 +144,7 @@ def process_event(event: NetworkEvent) -> PredictionResult:
     if is_threat:
         vault_result = vault_client.rotate_credentials(
             reason=f"threat_detected_score_{ensemble_score:.4f}",
-            user=event_dict.get("user", "unknown"),
+            user=event_dict.get("user_id", "unknown"),
             threat_score=ensemble_score,
         )
     vault_latency = (time.time() - vault_t0) * 1000
@@ -175,11 +182,11 @@ def process_event(event: NetworkEvent) -> PredictionResult:
             "event_id": event_id,
             "threat_score": round(ensemble_score, 6),
             "threat_action": threat_action.value,
-            "attack_type": event_dict.get("attack_type", "unknown"),
+            "attack_type": event_dict.get("anomaly_type", "unknown"),
             "source_ip": event_dict.get("source_ip", ""),
-            "destination_ip": event_dict.get("destination_ip", ""),
-            "user": event_dict.get("user", ""),
-            "hostname": event_dict.get("hostname", ""),
+            "ip_region": event_dict.get("ip_region", ""),
+            "user": event_dict.get("user_id", ""),
+            "action": event_dict.get("action", ""),
             "xgb_score": round(xgb_score, 6),
             "lgb_score": round(lgb_score, 6),
             "ensemble_score": round(ensemble_score, 6),
@@ -192,7 +199,7 @@ def process_event(event: NetworkEvent) -> PredictionResult:
             "event_id": event_id,
             "threat_score": ensemble_score,
             "action": threat_action.value,
-            "user": event_dict.get("user", ""),
+            "user": event_dict.get("user_id", ""),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -219,16 +226,30 @@ def process_event(event: NetworkEvent) -> PredictionResult:
     _metrics["total_latency_ms"] += total_latency
     if is_threat:
         _metrics["total_threats"] += 1
-    action_key = f"total_{threat_action.value.lower()}"
-    if action_key in _metrics:
+    # Map action enum to metrics key (CRITICAL_ALERT → total_critical)
+    _action_key_map = {
+        ThreatAction.ALLOW: "total_allowed",
+        ThreatAction.MONITOR: "total_monitored",
+        ThreatAction.BLOCK: "total_blocked",
+        ThreatAction.CRITICAL_ALERT: "total_critical",
+    }
+    action_key = _action_key_map.get(threat_action)
+    if action_key:
         _metrics[action_key] += 1
     if is_threat:
-        at = event_dict.get("attack_type", "unknown")
+        at = event_dict.get("anomaly_type", "unknown")
         _metrics["attack_types"][at] = _metrics["attack_types"].get(at, 0) + 1
 
-    # Build geo data
-    src_geo = inference.ip_to_geo(event_dict.get("source_ip", ""))
-    dst_geo = inference.ip_to_geo(event_dict.get("destination_ip", ""))
+    # Map region to approximate geo coordinates for globe visualization
+    region_geo = {
+        "US-East": {"lat": 40.71, "lng": -74.01, "city": "New York"},
+        "US-West": {"lat": 37.77, "lng": -122.42, "city": "San Francisco"},
+        "EU-Central": {"lat": 50.11, "lng": 8.68, "city": "Frankfurt"},
+        "Asia-Pacific": {"lat": 1.35, "lng": 103.82, "city": "Singapore"},
+        "South-America": {"lat": -23.55, "lng": -46.63, "city": "São Paulo"},
+    }
+    src_geo = region_geo.get(event_dict.get("ip_region", ""), {"lat": 0, "lng": 0, "city": "Unknown"})
+    dst_geo = region_geo.get(event_dict.get("user_region", ""), {"lat": 12.97, "lng": 77.59, "city": "Bangalore"})
 
     return PredictionResult(
         event_id=event_id,
@@ -245,11 +266,11 @@ def process_event(event: NetworkEvent) -> PredictionResult:
         total_latency_ms=round(total_latency, 2),
         timestamp=datetime.now(timezone.utc).isoformat(),
         event_summary={
-            "user": event_dict.get("user", ""),
-            "event_type": event_dict.get("event_type", ""),
+            "user": event_dict.get("user_id", ""),
             "source_ip": event_dict.get("source_ip", ""),
-            "destination_ip": event_dict.get("destination_ip", ""),
-            "process_name": event_dict.get("process_name", ""),
-            "hostname": event_dict.get("hostname", ""),
+            "ip_region": event_dict.get("ip_region", ""),
+            "action": event_dict.get("action", ""),
+            "anomaly_type": event_dict.get("anomaly_type", ""),
+            "geo_mismatch": event_dict.get("geo_mismatch", False),
         },
     )

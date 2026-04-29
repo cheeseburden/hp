@@ -11,10 +11,10 @@ VAULT_ADDR = os.getenv("VAULT_ADDR", "http://localhost:8200")
 VAULT_TOKEN = os.getenv("VAULT_TOKEN", "hpe-dev-token")
 
 # ── Model paths ────────────────────────────────────────────────────────────────
-MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "model_output", "pipeline_artifacts.joblib"
-))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(BASE_DIR, "model_output", "pipeline_artifacts_v2.joblib"))
+TEST_EVENTS_PATH = os.getenv("TEST_EVENTS_PATH", os.path.join(BASE_DIR, "model_output", "test_events.json"))
+PROFILES_PATH = os.getenv("PROFILES_PATH", os.path.join(BASE_DIR, "model_output", "user_profiles.json"))
 SAMPLE_EVENTS_PATH = os.getenv("SAMPLE_EVENTS_PATH", os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "model_output", "sample_events.json"
