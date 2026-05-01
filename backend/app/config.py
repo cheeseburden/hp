@@ -5,7 +5,7 @@ config.py — Environment configuration for the HPE pipeline backend.
 import os
 
 # ── Infrastructure connections ──────────────────────────────────────────────────
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9094")
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9094,localhost:9095,localhost:9096")
 ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
 VAULT_ADDR = os.getenv("VAULT_ADDR", "http://localhost:8200")
 VAULT_TOKEN = os.getenv("VAULT_TOKEN", "hpe-dev-token")
