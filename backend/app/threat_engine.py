@@ -266,8 +266,21 @@ def process_event(event: NetworkEvent) -> PredictionResult:
         "Asia-Pacific": {"lat": 1.35, "lng": 103.82, "city": "Singapore"},
         "South-America": {"lat": -23.55, "lng": -46.63, "city": "São Paulo"},
     }
-    src_geo = region_geo.get(event_dict.get("ip_region", ""), {"lat": 0, "lng": 0, "city": "Unknown"})
-    dst_geo = region_geo.get(event_dict.get("user_region", ""), {"lat": 12.97, "lng": 77.59, "city": "Bangalore"})
+
+    # Server location (HPE HQ)
+    server_geo = {"lat": 12.97, "lng": 77.59, "city": "Bangalore"}
+
+    ip_region = event_dict.get("ip_region", "")
+    user_region = event_dict.get("user_region", "")
+
+    src_geo = region_geo.get(ip_region, {"lat": 0, "lng": 0, "city": "Unknown"})
+
+    # If source and destination regions are the same, route arc to the server
+    # so the globe shows a meaningful path (traffic flowing to the HPE server)
+    if ip_region == user_region or user_region not in region_geo:
+        dst_geo = server_geo
+    else:
+        dst_geo = region_geo.get(user_region, server_geo)
 
     # Build the pipeline stages dicts for admin alert storage
     stages_dicts = [s.model_dump() for s in stages]
