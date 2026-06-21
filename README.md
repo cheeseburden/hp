@@ -226,7 +226,7 @@ hpe/
 │   ├── generate_conn_log_from_test_events.py  # Build a conn.log from test_events.json (uid=event_id)
 │   └── generate_zeek_pcap.py   # Synthetic PCAP generation
 └── dataset/                    # Network Telemetry Training Logs
-    ├── updated_realistic_network_logs.csv  # 100k+ network event records
+    ├── updated_realistic_network_logs.csv  # 25,000 network event records
     ├── updated_realistic_user_profiles.csv  # Behavioral profiles
     └── zeek-live/              # Log harvester target workspace
 ```
@@ -801,7 +801,7 @@ k8s/
 ### Dataset
 
 The training dataset is included in `dataset/`:
-- `updated_realistic_network_logs.csv` — 100K+ network events with injected anomalies
+- `updated_realistic_network_logs.csv` — 25,000 network events with injected anomalies
 - `updated_realistic_user_profiles.csv` — User behavioral profiles
 
 ---
