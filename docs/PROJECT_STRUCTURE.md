@@ -60,12 +60,13 @@ hpe/
 │       ├── main.jsx            # React entry point
 │       ├── App.jsx             # Main application component with routing
 │       ├── components/         # React component library
-│       │   ├── Dashboard.jsx   # Main dashboard view
-│       │   ├── ThreatGlobe.jsx # 3D globe visualization (globe.gl)
-│       │   ├── PipelineFlow.jsx # 10-stage pipeline animation
-│       │   ├── AdminConsole.jsx # Security admin dashboard
-│       │   ├── VaultTerminal.jsx # HashiCorp Vault credential viewer
-│       │   └── StarField.jsx   # Background particle effects
+│       │   ├── AdminConsole.jsx       # Security admin console dashboard
+│       │   ├── AnalyticsDashboard.jsx # Bento-box dashboard (metrics, charts, and stats)
+│       │   ├── Header.jsx             # Navbar and workspace mode switcher (Live / Portal)
+│       │   ├── IframeSection.jsx      # Generic iframe embed section
+│       │   ├── PipelineFlow.jsx       # 10-stage pipeline defense animation flow
+│       │   ├── StarField.jsx          # Matrix/Cyberpunk canvas backdrop animation
+│       │   └── ThreatGlobe.jsx        # 3D geospatial WebGL globe visualization
 │       └── styles/
 │           └── index.css       # Complete design system
 │
@@ -111,12 +112,13 @@ hpe/
 |---|---|
 | `main.jsx` | React entry point, WebSocket connection initialization |
 | `App.jsx` | Main application component, routing between views |
-| `Dashboard.jsx` | Bento-box metrics dashboard with real-time updates |
+| `AdminConsole.jsx` | Security admin console dashboard displaying alerts, audits, and reset controls |
+| `AnalyticsDashboard.jsx` | Bento-box metrics dashboard containing real-time counters and graphs |
+| `Header.jsx` | Navbar containing the connection indicators and workspace mode toggle (Live / Portal) |
+| `IframeSection.jsx` | Container to frame external pages |
+| `PipelineFlow.jsx` | Animates the 10-stage pipeline flow with integration to Vault credentials |
+| `StarField.jsx` | Canvas particle matrix background animation |
 | `ThreatGlobe.jsx` | 3D Earth with attack arcs (source → destination geo mapping) |
-| `PipelineFlow.jsx` | Animates the 10-stage pipeline flow with Vault terminal |
-| `AdminConsole.jsx` | Security admin panel for alert management |
-| `VaultTerminal.jsx` | HashiCorp Vault credential rotation visualization |
-| `StarField.jsx` | Canvas particle effects and visual backgrounds |
 | `index.css` | Complete design system: variables, layouts, animations, responsive |
 
 ### 🐳 Docker Services
@@ -184,9 +186,9 @@ test_events.json ──► /ws/simulate ──► Kafka (produce)
                                                              ▼
                                                     WebSocket broadcast
                                                              │
-                                              ┌──────────────┼──────────────┐
-                                              ▼              ▼              ▼
-                                         pipeline.js     globe.js     dashboard.js
+                                               ┌──────────────┼──────────────┐
+                                               ▼              ▼              ▼
+                                        PipelineFlow.jsx ThreatGlobe.jsx AnalyticsDashboard.jsx
 ```
 
 ---
@@ -221,7 +223,7 @@ test_events.json ──► /ws/simulate ──► Kafka (produce)
 | Change Vault credential fields | `backend/app/vault_client.py` |
 | Add admin authentication logic | `backend/app/auth_admin.py` |
 | Modify admin dashboard features | `frontend/src/components/AdminConsole.jsx` |
-| Change main dashboard layout | `frontend/src/components/Dashboard.jsx` |
+| Change main dashboard layout | `frontend/src/components/AnalyticsDashboard.jsx` |
 | Update 3D globe appearance | `frontend/src/components/ThreatGlobe.jsx` |
 | Update CSS / colors / animations | `frontend/src/styles/index.css` |
 | Add a new Docker service | `docker-compose.yml` or `docker-compose.portal.yml` |

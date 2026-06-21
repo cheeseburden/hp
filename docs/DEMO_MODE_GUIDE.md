@@ -162,8 +162,13 @@ kubectl rollout restart deployment/backend -n hpe
 export ENABLE_AUTO_USER_ROTATION=false
 docker-compose restart backend
 
-# Start simulation
-curl -X POST http://localhost:8000/api/simulate/start
+# Start simulation:
+# Connect the 3D Security Dashboard (http://localhost:5173) which opens the WebSocket stream at ws://localhost:8000/ws/simulate
+# Or trigger a single custom anomaly from the Threat Simulation Portal (http://localhost:8080)
+# Or manually POST a threat event via curl:
+curl -X POST http://localhost:8000/api/auth/simulate \
+  -H "Content-Type: application/json" \
+  -d '{"username":"USR-0042", "password":"currentPassword", "ip_region":"EU-Central", "is_vpn":true}'
 
 # Credentials await admin approval in admin dashboard
 ```
@@ -174,8 +179,13 @@ curl -X POST http://localhost:8000/api/simulate/start
 export ENABLE_AUTO_USER_ROTATION=true
 docker-compose restart backend
 
-# Start simulation
-curl -X POST http://localhost:8000/api/simulate/start
+# Start simulation:
+# Connect the 3D Security Dashboard (http://localhost:5173) to launch the WebSocket stream
+# Or trigger a single custom anomaly from the Threat Simulation Portal (http://localhost:8080)
+# Or manually POST a threat event via curl:
+curl -X POST http://localhost:8000/api/auth/simulate \
+  -H "Content-Type: application/json" \
+  -d '{"username":"USR-0042", "password":"currentPassword", "ip_region":"EU-Central", "is_vpn":true}'
 
 # Credentials rotate automatically on threat detection
 ```

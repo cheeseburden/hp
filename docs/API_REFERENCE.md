@@ -316,6 +316,76 @@ Process threat simulation event through the pipeline.
 
 ---
 
+### `GET /api/auth/demo-users`
+Get IDs of the 3 curated demo users whose passwords are visible in the login helper dropdown.
+
+**Response:**
+```json
+{
+  "demo_users": ["USR-0001", "USR-0002", "USR-0005"]
+}
+```
+
+---
+
+### `GET /api/auth/login-history/{user_id}`
+Retrieve the login memory for a user (last session time, region, IP, and failure count).
+
+**Response:**
+```json
+{
+  "user_id": "alice",
+  "last_login": "2026-06-20T10:30:00Z",
+  "last_login_region": "US-East",
+  "last_login_ip": "192.168.1.50",
+  "failed_attempts": 0
+}
+```
+
+---
+
+### `GET /api/auth/users`
+List all active portal users and their roles.
+
+**Response:**
+```json
+[
+  { "user_id": "alice", "role": "Developer" }
+]
+```
+
+---
+
+### `GET /api/auth/user-profile/{user_id}`
+Fetch the behavioral baseline profile metrics used by the ML models to assess anomalies for a user.
+
+**Response:**
+```json
+{
+  "user_id": "alice",
+  "role": "Developer",
+  "base_login_hour": 9,
+  "login_hour_std_dev": 2.0,
+  "avg_daily_downloads_mb": 50.0,
+  "home_region": "US-East"
+}
+```
+
+---
+
+### `GET /api/auth/user-credential/{user_id}`
+Retrieve cleartext user login password directly from Vault.
+
+**Response:**
+```json
+{
+  "user_id": "alice",
+  "current_password": "password123"
+}
+```
+
+---
+
 ## Admin Dashboard Endpoints
 
 All admin endpoints require JWT authentication. Include the token in the `Authorization: Bearer <token>` header.
@@ -396,6 +466,27 @@ Fetch admin action audit trail (append-only log).
 
 ---
 
+### `GET /api/admin/infra-leases`
+Retrieve active Vault dynamic credential leases and connection status details.
+
+**Response:**
+```json
+{
+  "active_leases": [
+    {
+      "service": "elasticsearch",
+      "lease_id": "database/creds/hpe-backend-role/...",
+      "username": "v-app-...",
+      "issued_at": "..."
+    }
+  ],
+  "total_infra_rotations": 2,
+  "vault_infra_connected": true
+}
+```
+
+---
+
 ### `GET /api/admin/registrations`
 List pending user registration requests.
 
@@ -448,6 +539,79 @@ Execute pipeline reset with confirmation token (Step 2).
 
 ### `WS /api/admin/ws?token=<jwt_token>`
 WebSocket connection for real-time admin notifications.
+
+---
+
+## Database, Messaging & System Statistics
+
+### `GET /api/kafka/stats`
+Get real Kafka topic partition statistics and status metadata.
+
+**Response:**
+```json
+{
+  "connected": true,
+  "topics": {
+    "hpe-raw-events": {
+      "partitions": 1,
+      "offsets": { "0": 1054 }
+    }
+  }
+}
+```
+
+---
+
+### `GET /api/elasticsearch/recent-threats`
+Get recent threat events indexed into Elasticsearch.
+
+**Response:**
+```json
+{
+  "total": 1,
+  "threats": [
+    {
+      "event_id": "a1b2c3d4e5f6",
+      "timestamp": "2026-04-24T17:30:00Z",
+      "user_id": "USR-0042",
+      "threat_score": 0.923,
+      "anomaly_type": "data_exfiltration"
+    }
+  ]
+}
+```
+
+---
+
+### `GET /api/elasticsearch/stats`
+Get index statistics and threat breakdowns aggregated directly from Elasticsearch.
+
+**Response:**
+```json
+{
+  "connected": true,
+  "threat_breakdown": {
+    "data_exfiltration": 4,
+    "brute_force": 3
+  },
+  "index_doc_counts": {
+    "hpe-audit-logs": 57,
+    "hpe-threats": 7
+  }
+}
+```
+
+---
+
+### `GET /api/sample-events`
+Retrieve count of loaded test simulation events.
+
+**Response:**
+```json
+{
+  "test_events_count": 3500
+}
+```
 
 ---
 
